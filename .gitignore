@@ -1,0 +1,15 @@
+# Recon generated caches (recreated automatically)
+.recon/knowledge.json
+
+# Claude Code local settings (machine-specific auto-approvals)
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

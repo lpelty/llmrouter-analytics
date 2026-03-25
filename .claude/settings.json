@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "MultiEdit",
+      "Write",
+      "Glob",
+      "Grep",
+      "LS",
+      "Task",
+      "WebSearch",
+      "Bash(git:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(cd:*)",
+      "Bash(pwd:*)",
+      "Bash(echo:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(sort:*)",
+      "Bash(sed:*)",
+      "Bash(awk:*)",
+      "Bash(diff:*)",
+      "Bash(touch:*)",
+      "Bash(chmod:*)",
+      "Bash(which:*)",
+      "Bash(env:*)",
+      "Bash(open:*)",
+      "Bash(killall:*)",
+      "Bash(python3:*)",
+      "Bash(node:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)"
+    ],
+    "deny": [
+      "Bash(sudo:*)",
+      "Bash(rm -rf /:*)",
+      "Read(.env)",
+      "Read(.env.*)"
+    ]
+  }
+}
