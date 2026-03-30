@@ -1,257 +1,281 @@
-# LLMRouter Analytics Dashboard — Claude Code Instructions
+# CLAUDE.md — LLMRouter Analytics Dashboard (Thing 7)
+**Version:** 3.0
+**Last Updated:** March 30, 2026
+**Orchestrator:** Dispatch (AI Chief of Staff)
+**Owner:** Larry Paul Pelty, Jr.
 
-**Thing designation:** Thing 7
-**Orchestrator:** Dispatch
+---
 
-Read this file at the start of every session.
+## What You're Building
 
-## What this project is
+A lightweight, self-hosted web dashboard that monitors LLMRouter routing decisions in real time. It reads the router log file, parses routing decisions, and presents them visually so Larry can tell at a glance whether routing is working correctly and where money is going.
 
-A lightweight, self-hosted web dashboard that monitors LLMRouter routing decisions in real time. It tails the router log file, parses routing decisions (which model tier handled each request and why), and presents them visually — tier distribution, message type breakdown, cost estimates, misrouting flags, and a live decision stream. Two-part architecture: a Python backend that reads the log and serves JSON, and a single-file HTML frontend that polls and renders. Runs on localhost on Larry's Mac Mini alongside Lyra's infrastructure. Not a cloud service, not a database-backed app — just a log parser with a pretty face.
+**This is NOT Buildmeter** (Kestrel's project — that's fleet-wide cost tracking). This tool is specifically about LLMRouter *routing intelligence*.
 
-## Tech stack
-
-- **Backend:** Python 3.10+ — standard library only (http.server, json, re, os). No pip installs.
-- **Frontend:** Single HTML file — vanilla HTML/CSS/JS. Chart.js via CDN is acceptable for visualizations.
-- **No build tools.** No npm, no bundler, no Docker, no venv.
-- **Run command:** `python3 routing-analytics-server.py`
-- **Port:** 9100 (configurable at top of server file)
+---
 
 ## Architecture
 
-The server reads a log file, parses it into structured routing decisions, and serves JSON to a browser frontend that polls every 5-10 seconds.
+### Backend: Python HTTP Server
+- **File:** `routing-analytics-server.py`
+- **Port:** 9100 (configurable)
+- **Dependencies:** Python 3.10+ standard library only (zero pip installs)
+- **Endpoints:**
+  - `GET /` — serves built frontend (static files from `frontend/dist/`)
+  - `GET /api/decisions?hours=24` — returns parsed routing decisions as JSON
+  - `GET /api/summary?hours=24` — returns aggregated stats
+  - `GET /api/health` — server health check
+- **Data source:** `/Users/larrypelty/scripts/lyra-router.log` (read-only, never write)
 
-```
-┌─────────────────┐         ┌──────────────────────┐
-│  lyra-router.log │ ──────> │  Python HTTP Server   │
-│  (append-only)   │  read   │  (localhost:9100)      │
-└─────────────────┘         │                        │
-                            │  GET /                 │ ──> routing-analytics.html
-                            │  GET /api/decisions    │ ──> parsed decisions JSON
-                            │  GET /api/summary      │ ──> aggregated stats JSON
-                            │  GET /api/health       │ ──> server health
-                            └──────────────────────┘
-                                      │
-                                      │ polls every 5-10s
-                                      ▼
-                            ┌──────────────────────┐
-                            │  Browser (localhost)   │
-                            │  - Tier distribution   │
-                            │  - Message type matrix │
-                            │  - Decision stream     │
-                            │  - Cost estimates      │
-                            │  - Misroute alerts     │
-                            └──────────────────────┘
-```
+### Frontend: React + Tailwind CSS v4 + shadcn/ui
+- **Directory:** `frontend/`
+- **Stack:** React 19, Tailwind CSS v4, shadcn/ui (Radix primitives), Recharts
+- **Build:** Vite → outputs to `frontend/dist/` → served by Python backend
+- **Runtime:** `python3 serve.py` and open browser. Node.js is only for development builds.
 
-**Key constraint:** The server is read-only. It never writes to the log file or modifies router configuration.
+### Development Workflow
+```bash
+# Development (hot reload)
+cd frontend && npm run dev          # Vite dev server on :5173
+python3 routing-analytics-server.py  # API server on :9100
+# Vite proxies /api/* to :9100 during development
 
-## Critical: File placement rules
-
-All repo-level files live at the **repo root**, NOT inside any build tool subdirectory.
-
-```
-routing-analytics/                   ← REPO ROOT
-├── CLAUDE.md                        ← HERE
-├── SUB_AGENTS.md                    ← Sub-agent delegation rules
-├── .claude/commands/                ← Slash commands (recon, handoff, delegate, preflight)
-├── .recon/                          ← Recon knowledge graph + failure memory
-├── tasks/
-│   ├── todo.md
-│   ├── lessons.md
-│   ├── active-chunks.md
-│   └── doc-updates.md
-├── routing-analytics-server.py      ← Python backend (single file)
-├── routing-analytics.html           ← Frontend dashboard (single file)
-└── README.md
+# Production
+cd frontend && npm run build         # Outputs to dist/
+python3 routing-analytics-server.py  # Serves dist/ + API on :9100
 ```
 
-If you find yourself creating CLAUDE.md, tasks/, or .claude/ inside a subdirectory, you are in the WRONG directory. Stop and fix it.
+---
 
-## Key data model decisions
+## The 4-Tier Routing Model
 
-### Log file format
+LLMRouter v6.0 uses `strategy: llm` with a Grok 4.1 Fast (non-reasoning) classifier. Four backend tiers:
 
-The LLMRouter log file (`/Users/larrypelty/scripts/lyra-router.log`) uses `============` as block separators. Each block contains:
+| Tier | Model | Cost (input/output per 1M) | Color | Purpose |
+|------|-------|---------------------------|-------|---------|
+| Flash Lite | `google/gemini-3.1-flash-lite-preview` | $0.25 / $1.50 | Gray `#7A7A8C` | Mechanical: classifier calls, heartbeat routing |
+| Flash | `google/gemini-3-flash-preview` | $0.50 / $3.00 | Blue `#60A5FA` | Tool calls: simple reads, lookups, status checks |
+| Grok | `x-ai/grok-4.1-fast` | $0.20 / $0.50 | Green `#4ADE80` | Companion: conversation, personality, blended requests |
+| Sonnet | `anthropic/claude-sonnet-4-6` | $3.00 / $15.00 | Purple `#C084FC` | Last resort: complex reasoning, creative, multi-step analysis |
 
+**Misroute color:** Coral red `#E6495A`
+
+**Key routing facts:**
+- Grok is the companion tier — most conversation goes here. It's cheaper than Flash on output tokens.
+- Sonnet is the LAST RESORT tier. If heartbeats, dreams, or simple tool calls hit Sonnet, that's a misroute.
+- Flash handles tool-call-only requests (no conversation wrapping).
+- Flash Lite handles the classifier itself and mechanical tasks.
+- Heartbeat has a model override (`openrouter/google/gemini-3-flash-preview`) that bypasses the router entirely.
+
+---
+
+## Message Type Classification
+
+Derived from message content in the router log:
+
+| Type | Detection Pattern | Expected Tier |
+|------|------------------|---------------|
+| `heartbeat` | Contains "HEARTBEAT.md" or "HEARTBEAT_OK" | Flash (override) |
+| `session_startup` | Contains "Session Startup sequence" or "/new" | Flash or Flash Lite |
+| `dream_cron` | Contains "DREAM.md" or cron dream trigger | Grok |
+| `exploration` | Contains exploration trigger patterns | Grok |
+| `task_worker` | Contains "TASKS.md" or task worker trigger | Flash → Sonnet (escalates) |
+| `filename_slug` | Contains "filename slug" | Flash Lite |
+| `voice_note` | Contains "[Audio]" | Grok |
+| `system_event` | Contains "System:" or "Exec completed" | Flash Lite |
+| `conversation` | Everything else | Grok |
+
+---
+
+## Router Log Format
+
+**Path:** `/Users/larrypelty/scripts/lyra-router.log`
+
+Blocks separated by `============` dividers. Each block contains:
 ```
 [Router] Strategy=llm -> tier_name
-[Router] LLM error: error_message        (optional — classifier failures)
+[Router] LLM error: error_message                       (classifier failures)
 [Router] Query: 'message_content...' -> tier_name
 INFO:     127.0.0.1:PORT - "POST /v1/chat/completions HTTP/1.1" 200 OK
 ```
 
-Older entries use `Strategy=rules` instead of `Strategy=llm`. Both should be parsed.
+**Tier names in log:** `flash-lite`, `flash`, `grok`, `sonnet`
 
-### Message metadata stripping
+**Message metadata:** Messages from Telegram include JSON metadata blocks (conversation info, sender info) wrapped in triple-backtick fences. Strip these to extract the actual user message for display.
 
-Telegram messages include JSON metadata blocks that must be stripped to get the actual user message:
+---
 
+## UI Design Spec (v4.1)
+
+Design file: `llmrouter-analytics.pen` in repo root. v4.1 is the current target. The .pen file contains v1 through v4.1 as an iterative design trail — v4.1 is what to build.
+
+### Layout Structure
 ```
-Conversation info (untrusted metadata):
-\```json
-{ ... }
-\```
-
-Sender (untrusted metadata):
-\```json
-{ ... }
-\```
-```
-
-Strip these before displaying message previews.
-
-### Message type classification
-
-Classify messages by content inspection:
-- `heartbeat` — contains "HEARTBEAT.md" or "HEARTBEAT_OK"
-- `session_startup` — contains "Session Startup sequence" or "/new or /reset"
-- `dream_cron` — contains "DREAM.md" or cron dream trigger
-- `filename_slug` — contains "filename slug"
-- `voice_note` — contains "[Audio]"
-- `system_event` — contains "System:" or "Exec completed"
-- `conversation` — everything else
-
-### Tier pricing (per 1M tokens)
-
-```python
-PRICING = {
-    "flash-lite": {"input": 0.25, "output": 1.5},
-    "flash": {"input": 0.5, "output": 3.0},
-    "sonnet": {"input": 3.0, "output": 15.0},
-    # Legacy rules-based tier names
-    "gemini-flash": {"input": 0.5, "output": 3.0},
-    "gemini-flash-lite": {"input": 0.25, "output": 1.5},
-}
+┌─────────────────────────────────────────────────────┐
+│ Header: Title | [Rolling: 24h 7d 30d] | [To-now:    │
+│                 Today WTD MTD YTD]    | ● Live 3m   │
+├─────────────────────────────────────────────────────┤
+│ ⚠ Alert Banner (hero when misroutes exist)          │
+│   "8 misroutes detected — 7.6% of traffic"          │
+│   "Heartbeats routing to Sonnet..."    [View Details]│
+├─────────────────────────────────────────────────────┤
+│ [Total Decisions] [Estimated Cost] [Misroute Rate]  │
+│   419               $9.42             7.6%          │
+├──────────────────────────────┬──────────────────────┤
+│ Tier Distribution            │ Recent Decisions     │
+│ ████████████████████████████ │ ┌──────────────────┐ │
+│ Grok 54% Flash 23% Son 13%  │ │ Grok conversation │ │
+│                              │ │ "Hey Lyra, can..."│ │
+│ Message Type × Tier          │ ├──────────────────┤ │
+│ ┌────────────────────────┐   │ │ Flash tool_call   │ │
+│ │ Type    Grok Flash Son │   │ │ "Read HEARTBEAT.."│ │
+│ │ heartbt  3    1   *2*  │   │ ├──────────────────┤ │
+│ │ convers  64   —    —   │   │ │ Sonnet heartbeat  │ │
+│ │ tool_cl  —    15   2   │   │ │ MISROUTE          │ │
+│ │ reason   —    —    8   │   │ │ Expected: Lite    │ │
+│ │ dream    1    —    —   │   │ └──────────────────┘ │
+│ └────────────────────────┘   │      View all →      │
+└──────────────────────────────┴──────────────────────┘
 ```
 
-### Misrouting rules
+### Time Period Selectors
+Two mutually exclusive groups separated by a visual divider:
+- **Rolling periods:** 24h, 7d, 30d (how far back from now)
+- **To-now periods:** Today, WTD (Week to Date), MTD (Month to Date), YTD (Year to Date)
+Only one selection active at a time. Active tab has filled background; inactive tabs are text-only.
 
-These define which tiers are acceptable for each message type:
+### Typography
+- **Geist** — headings, metric values (large numbers)
+- **Inter** — body text, labels, descriptions
+- **IBM Plex Mono** — data values, code, table content, tier labels
 
-```python
-MISROUTE_RULES = {
-    "heartbeat": ["flash-lite", "flash"],
-    "session_startup": ["flash-lite", "flash"],
-    "filename_slug": ["flash-lite"],
-    "voice_note": ["flash", "sonnet"],
-    "conversation": ["flash", "sonnet"],
-    "dream_cron": ["sonnet"],
-    "system_event": ["flash-lite", "flash", "sonnet"],
-}
+### Component Plan (shadcn/ui)
+- Card — metric summary cards, chart containers
+- Table — message type × tier matrix
+- Badge — tier tags, message type tags, misroute flags
+- Tabs — time period selector (custom: two tab groups)
+- Alert — misroute and error rate alerts
+- Tooltip — detail on hover for truncated messages
+- ScrollArea — scrollable decision stream
+
+### Dark Theme Surface System
+- Background: `#111115`
+- Card/panel: `#19191F`
+- Elevated surface: `#22222A`
+- Border: `#33333F`
+- Muted text: `#7A7A8C`
+- Secondary text: `#A0A0B0`
+- Primary text: `#F5F5FA`
+
+### Tier Distribution Bar
+Full-width horizontal stacked bar representing 100% of traffic. Each segment is proportional to the tier's percentage. If only one tier received traffic, the bar is 100% that color. Legend below shows: tier name, percentage, and estimated cost.
+
+### Matrix Design
+- Only show rows with actual routing activity (no empty rows)
+- Misroute cells highlighted in red with bold text
+- Status column with "clean" (green) or "N misrouted" (red) tags
+- Misroute rows get a subtle red background tint
+
+### Decision Stream
+- 3-4 most recent entries visible
+- Each entry: tier color pill + message type (mono) + relative timestamp
+- Message preview below (1 line, truncated)
+- Misroute entries: red border, "MISROUTE" badge, "Expected: X → Routed: Y" line
+- "View all →" link at panel header
+
+---
+
+## Misrouting Rules
+
+A decision is flagged as a misroute when:
+- `heartbeat` → anything other than `flash` (has model override, but monitor)
+- `session_startup` → `sonnet` or `grok`
+- `filename_slug` → anything other than `flash-lite`
+- `conversation` → anything other than `grok`
+- `voice_note` → anything other than `grok`
+- `dream_cron` → `sonnet` (should be `grok` per Session 13 tightening)
+- `exploration` → `sonnet` (should be `grok`)
+- `tool_call` (simple read) → `sonnet`
+
+These rules should be configurable in the Python backend (a config dict, not hardcoded throughout).
+
+---
+
+## Cost Estimation
+
+Estimated cost per decision = (avg_input_tokens × input_price + avg_output_tokens × output_price) per tier.
+
+Default token estimates (refine from real data later):
+- Flash Lite: ~600 input, ~100 output (classifier calls)
+- Flash: ~2,000 input, ~200 output (tool calls)
+- Grok: ~4,000 input, ~500 output (conversation)
+- Sonnet: ~8,000 input, ~1,000 output (reasoning)
+
+These are rough — the dashboard should make them configurable.
+
+---
+
+## Project Structure
+```
+llmrouter-analytics/
+├── routing-analytics-server.py    ← Python backend
+├── llmrouter-analytics.pen        ← Pencil.dev design file (v1-v4.1)
+├── frontend/
+│   ├── package.json
+│   ├── vite.config.ts
+│   ├── tailwind.config.ts
+│   ├── components.json              ← shadcn/ui config
+│   ├── src/
+│   │   ├── App.tsx
+│   │   ├── components/
+│   │   │   ├── ui/                   ← shadcn/ui components (owned)
+│   │   │   ├── dashboard/            ← dashboard-specific components
+│   │   │   └── ...
+│   │   ├── lib/
+│   │   │   ├── api.ts                ← API client (polling, data fetching)
+│   │   │   ├── types.ts              ← TypeScript types for routing data
+│   │   │   └── utils.ts              ← shadcn cn() utility
+│   │   └── index.css                 ← Tailwind + shadcn theme tokens
+│   └── dist/                         ← Built output (served by Python)
+├── CLAUDE.md                         ← This file
+├── SUB_AGENTS.md
+├── tasks/
+└── .recon/
 ```
 
-A routing decision is flagged as a misroute when the tier is NOT in the acceptable list for the message type.
+---
 
-## Conventions
+## Key Reference Files
 
-- **Tests:** Not required for v1 (two-file project with no dependencies). If the project grows, add pytest for the parser logic.
-- **Commits:** After each working feature. Message format: "Implement [feature] with [key behavior]"
-- **Branch strategy:** main only for v1. Feature branches if complexity warrants it.
-- **Never commit secrets.** The log path is a config constant, not a secret, but don't commit actual log files.
+| Resource | Location |
+|----------|----------|
+| LLMRouter config | `/Users/larrypelty/LLMRouter/configs/lyra.yaml` |
+| Router log | `/Users/larrypelty/scripts/lyra-router.log` |
+| Router error log | `/Users/larrypelty/scripts/lyra-router-error.log` |
+| LaunchAgent plist | `~/Library/LaunchAgents/com.lyra.llmrouter.plist` |
+| PRD (Notion) | https://www.notion.so/32e1099a9e07816592a6d707cd4e5d5c |
+| Handoff page (Notion) | https://www.notion.so/32e1099a9e0781158b44f18f46bba025 |
+| Design file | `llmrouter-analytics.pen` (repo root) |
 
-## Python-specific patterns
+---
 
-- **Standard library only.** Do not introduce pip dependencies. The `http.server` module handles HTTP. `json` handles serialization. `re` handles log parsing. If you think you need a library, find a stdlib solution instead.
-- **Single-file backend.** Everything lives in `routing-analytics-server.py` — server, parser, API handlers. Don't split into modules unless the file exceeds ~500 lines.
-- **Log reading strategy:** Read the full log file on each API request. The file is ~19K lines for weeks of data — fast enough for localhost. If this becomes a bottleneck, implement an in-memory cache with mtime-based invalidation.
-- **Time window filtering:** The API accepts `?hours=N` to filter decisions. Parse all decisions, then filter by timestamp. If timestamps aren't extractable from the log (they may not be — the log format doesn't include explicit timestamps), use line position as a proxy or document the limitation.
+## Chunk Workflow
 
-## Frontend design direction
+1. Build in focused chunks. Each chunk = one logical unit of work.
+2. After each chunk, write a handoff entry to the Notion handoff page.
+3. Commit with descriptive messages.
+4. Don't skip the frontend build step — Larry's runtime is `python3 serve.py`, not `npm run dev`.
 
-The dashboard should feel like a companion to the OpenClaw Control UI — dark theme, technical but not ugly. Design reference:
+### Suggested First Chunks
+1. **Backend:** Python server that tails the log, parses decisions, serves JSON via `/api/decisions` and `/api/summary`
+2. **Frontend scaffold:** Vite + React + Tailwind + shadcn/ui setup, dark theme tokens, proxy config
+3. **Dashboard shell:** Header with time period selectors, metric cards, auto-polling
+4. **Tier distribution + matrix:** Stacked bar and message type × tier table
+5. **Decision stream + alerts:** Right panel with recent decisions, misroute alert banner
 
-- **Dark background** — near-black or dark gray, not pure #000
-- **Color-coded tiers:** Flash Lite = muted/gray, Flash = green/teal, Sonnet = amber/gold
-- **Misroutes** in a warning color (red or coral)
-- **Monospace for data,** proportional for labels
-- **No framework.** Vanilla JS. Chart.js (via CDN) for charts if needed.
-- **Single-page layout.** Summary cards at top, charts in middle, decision stream at bottom.
-- **Auto-refreshing.** Poll the API every 5-10 seconds. Show a "last updated" timestamp.
+---
 
-## Recon protocol
-
-This project uses a reconnaissance system to prevent blind code changes. Recon data lives in `.recon/` and is managed by the `/recon` and `/recon-status` slash commands.
-
-**Purpose:** Map a file's exports, imports, dependents, test coverage, and failure history BEFORE modifying it. The goal is to know what breaks downstream before writing a single line of code.
-
-### When to run recon automatically
-
-Before modifying any file, run `/recon <target>` silently when ANY of these are true:
-
-1. **Multiple dependents**: The target file is imported by 2 or more other files
-2. **Failure history**: The target file has an entry in `.recon/failures.json`
-3. **Interface change**: The planned change will modify exported function signatures, types, or class interfaces
-4. **Unfamiliar file**: The target file has no entry in `.recon/knowledge.json`
-
-Skip recon when ALL of these are true:
-- The change is cosmetic (string literals, comments, formatting)
-- The file has 0 dependents
-- The file has no failure history
-- You already ran recon on this file in the current session
-
-### Failure logging (always active)
-
-After any failed code change (tests fail, type errors, build errors):
-
-1. STOP before retrying
-2. Log the failure to `.recon/failures.json` (see `/recon` command for format)
-3. Re-run `/recon <target>` to get updated context
-4. Only then attempt a different approach
-
-### Blocked file protocol
-
-If a file has status `blocked` in `.recon/failures.json` (3+ failures with same error category):
-
-1. Do NOT attempt to modify it without explicit user approval
-2. Show the failure history and explain what's been tried
-3. Suggest a fundamentally different approach — not a variation of previous attempts
-4. If approved, inject ALL previous failure context before starting
-
-### Relationship to tasks/lessons.md
-
-`.recon/failures.json` is machine-readable failure memory — structured data parsed automatically to prevent retry loops. `tasks/lessons.md` is human-readable wisdom — prose patterns written after resolving issues. When a blocked file gets resolved, write the lesson to `lessons.md`.
-
-## Context window management
-
-Context is finite. Manage it deliberately:
-
-- **Delegate heavy implementation** to sub-agents via `/delegate`. Keep this Thing's context lean for orchestration and chunk-level decisions.
-- **Front-load critical context.** When starting a chunk, read the most important files first. Recon output and failure history take priority over implementation details.
-- **Skip recon on low-risk files.** If a file has 0 dependents, no failure history, and you're making a self-contained change, you can skip `/recon` to preserve context.
-- **Break large chunks.** If a chunk requires modifying 5+ files with interdependencies, ask the orchestrator to split it. Better to do two clean chunks than one that compacts mid-execution.
-- **Sub-agent results are summaries.** When a sub-agent returns, you get the summary, not the full implementation context. This is a feature — it keeps your context clean.
-
-## Sub-agent delegation
-
-This project uses sub-agents for parallelism and context management. Read `SUB_AGENTS.md` for the full delegation protocol. Use `/delegate` to generate properly scoped sub-agent tasks.
-
-Key rules:
-- Max nesting depth: 1 (sub-agents cannot spawn their own sub-agents)
-- Every delegation includes explicit file boundaries and a Do NOT list
-- Sub-agents do NOT post handoffs or update coordination files
-- The Thing resolves conflicts between sub-agent outputs before committing
-
-## After completing a chunk
-
-Run `/handoff` to generate and post the structured handoff entry.
-
-Handoff destination (Notion):
-Page URL: https://www.notion.so/Claude-Code-Handoff-LLMRouter-Analytics-32e1099a9e0781158b44f18f46bba025
-
-If Notion MCP is unavailable, write to `tasks/doc-updates.md` as a fallback.
-
-## Do NOT
-
-- Skip recon on files with failure history — the failures happened for a reason
-- Modify a file's exported interface without first checking what imports it
-- Retry the same approach that already failed — the failure log exists for a reason
-- Delete or reset `.recon/failures.json` to get around blocks
-- Create CLAUDE.md, tasks/, or .claude/ inside a build subdirectory
-- Post handoffs from sub-agents — only the Thing posts handoffs
-- Spawn sub-agents from within a sub-agent (max depth: 1)
-- Renumber chunks or use sub-chunk letters (3A, 3B) — use the next sequential integer
-- Introduce pip dependencies — standard library only for the backend
-- Write to the router log file — this tool is strictly read-only
-- Commit actual log files to the repo — they contain conversation content
-- Use a frontend framework (React, Vue, etc.) — vanilla JS only
+*CLAUDE.md Version 3.0 — March 30, 2026*
+*v1.0: Initial handoff (Session 9)*
+*v2.0: Frontend stack rewrite to React + Tailwind + shadcn/ui (Session 9)*
+*v3.0: Updated for 4-tier routing (Grok companion), v4.1 design spec, time period selectors, updated misroute rules (Session 14)*
