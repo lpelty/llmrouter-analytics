@@ -14,6 +14,7 @@ const badgeVariants = cva(
         'flash-lite': 'border-transparent bg-tier-flash-lite/20 text-tier-flash-lite',
         flash: 'border-transparent bg-tier-flash/20 text-tier-flash',
         grok: 'border-transparent bg-tier-grok/20 text-tier-grok',
+        'grok-companion': 'border-transparent bg-tier-grok-companion/20 text-tier-grok-companion',
         sonnet: 'border-transparent bg-tier-sonnet/20 text-tier-sonnet',
         misroute: 'border-transparent bg-tier-misroute/20 text-tier-misroute',
       },

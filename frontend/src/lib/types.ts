@@ -56,7 +56,7 @@ export interface Health {
 }
 
 /** Tier identifiers */
-export type TierName = 'flash-lite' | 'flash' | 'grok' | 'sonnet';
+export type TierName = 'flash-lite' | 'flash' | 'grok' | 'grok-companion' | 'sonnet';
 
 /** Time period for filtering */
 export type TimePeriod =
@@ -68,6 +68,7 @@ export const TIER_COLORS: Record<TierName, string> = {
   'flash-lite': '#7A7A8C',
   'flash': '#60A5FA',
   'grok': '#4ADE80',
+  'grok-companion': '#34D399',
   'sonnet': '#C084FC',
 };
 
@@ -76,5 +77,6 @@ export const TIER_LABELS: Record<TierName, string> = {
   'flash-lite': 'Flash Lite',
   'flash': 'Flash',
   'grok': 'Grok',
+  'grok-companion': 'Grok Companion',
   'sonnet': 'Sonnet',
 };

@@ -53,6 +53,14 @@ TIER_CONFIG = {
         "avg_input_tokens": 4000,
         "avg_output_tokens": 500,
     },
+    "grok-companion": {
+        "label": "Grok Companion",
+        "color": "#34D399",
+        "input_price": 0.20,
+        "output_price": 0.50,
+        "avg_input_tokens": 4000,
+        "avg_output_tokens": 500,
+    },
     "sonnet": {
         "label": "Sonnet",
         "color": "#C084FC",
@@ -76,18 +84,18 @@ MESSAGE_TYPE_PATTERNS = [
     # "conversation" is the fallback — handled in code
 ]
 
-# Misroute rules: message_type -> set of ALLOWED tiers
+# Misroute rules: message_type -> set of ALLOWED tiers (v6.2 config)
 # If the routed tier is not in the allowed set, it's a misroute.
 MISROUTE_RULES: dict[str, set[str] | dict] = {
-    "heartbeat": {"flash"},
-    "session_startup": {"flash", "flash-lite"},
-    "filename_slug": {"flash-lite"},
-    "conversation": {"grok"},
-    "voice_note": {"grok"},
-    "dream_cron": {"grok", "flash", "flash-lite"},  # sonnet = misroute
-    "exploration": {"grok", "flash", "flash-lite"},  # sonnet = misroute
-    "task_worker": {"flash", "flash-lite", "grok", "sonnet"},  # escalation OK
-    "system_event": {"flash-lite", "flash", "grok", "sonnet"},  # lenient
+    "heartbeat": {"grok"},
+    "session_startup": {"grok"},
+    "filename_slug": {"grok"},
+    "conversation": {"grok", "grok-companion", "sonnet"},
+    "voice_note": {"grok-companion"},
+    "dream_cron": {"grok-companion"},
+    "exploration": {"grok"},
+    "task_worker": {"grok", "grok-companion"},
+    "system_event": {"grok", "grok-companion"},
 }
 
 # ---------------------------------------------------------------------------
@@ -149,6 +157,11 @@ RE_HTTP_LOG = re.compile(
     r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?)"  # timestamp (if present)
     r".*?INFO.*?POST\s+/v1/chat/completions"
 )
+# Match bracketed ISO timestamps: [2026-04-02T11:50:10]
+RE_BRACKETED_TIMESTAMP = re.compile(
+    r"\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\]"
+)
+# Fallback: bare timestamp anywhere in the line
 RE_TIMESTAMP_LINE = re.compile(
     r"(\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}:\d{2}(?:\.\d+)?)"
 )
@@ -226,8 +239,11 @@ def parse_log_file(path: str) -> tuple[list[dict], int]:
         tier = tier.lower().strip()
 
         # Try to extract a timestamp from the block
+        # Prefer bracketed ISO format [2026-04-02T11:50:10] (new log format)
         timestamp = None
-        ts_match = RE_TIMESTAMP_LINE.search(block)
+        ts_match = RE_BRACKETED_TIMESTAMP.search(block)
+        if not ts_match:
+            ts_match = RE_TIMESTAMP_LINE.search(block)
         if ts_match:
             timestamp = _parse_timestamp(ts_match.group(1))
 
@@ -351,13 +367,14 @@ def _filter_by_time(decisions: list[dict], params: dict[str, list[str]]) -> list
 
 
 def _filter_range(decisions: list[dict], start: datetime, end: datetime) -> list[dict]:
-    """Filter decisions whose timestamp falls within [start, end]."""
+    """Filter decisions whose timestamp falls within [start, end].
+    Entries without timestamps (old log format) are excluded from filtered views.
+    """
     result = []
     for d in decisions:
         ts_str = d.get("timestamp")
         if ts_str is None:
-            # No timestamp — include it (we can't filter it out reliably)
-            result.append(d)
+            # No timestamp — exclude from time-filtered views
             continue
         ts = datetime.fromisoformat(ts_str)
         if ts.tzinfo is None:
@@ -383,7 +400,7 @@ def compute_summary(decisions: list[dict], classifier_errors: int) -> dict:
 
     tier_distribution = []
     total_cost = 0.0
-    for tier_name in ("flash-lite", "flash", "grok", "sonnet"):
+    for tier_name in ("flash-lite", "flash", "grok", "grok-companion", "sonnet"):
         count = tier_counts.get(tier_name, 0)
         cost = estimate_cost(tier_name, count)
         total_cost += cost
@@ -400,7 +417,7 @@ def compute_summary(decisions: list[dict], classifier_errors: int) -> dict:
         )
 
     # Include any unknown tiers
-    known = {"flash-lite", "flash", "grok", "sonnet"}
+    known = {"flash-lite", "flash", "grok", "grok-companion", "sonnet"}
     for tier_name, count in tier_counts.items():
         if tier_name not in known:
             cost = 0.0

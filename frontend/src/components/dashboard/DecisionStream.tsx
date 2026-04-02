@@ -24,7 +24,7 @@ function relativeTime(timestamp: string | null): string {
   return `${diffD}d ago`;
 }
 
-function tierVariant(tier: TierName): 'flash-lite' | 'flash' | 'grok' | 'sonnet' {
+function tierVariant(tier: TierName): TierName {
   return tier;
 }
 
